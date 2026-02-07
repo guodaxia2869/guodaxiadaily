@@ -158,7 +158,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (path === '/' && req.method === 'GET') {
-      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'text/html' });
+      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' });
       res.end('<h1>📅 Schedule API</h1><p>API 运行正常</p><p><a href="/api/health">测试</a></p>');
       return;
     }
