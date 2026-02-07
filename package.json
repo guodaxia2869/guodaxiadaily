@@ -1,0 +1,14 @@
+{
+  "name": "schedule-api",
+  "version": "1.0.0",
+  "description": "Schedule API for guodaxia-daily",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": "18.x"
+  },
+  "license": "MIT"
+}
