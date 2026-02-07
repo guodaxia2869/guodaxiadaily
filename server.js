@@ -5,11 +5,17 @@ const url = require('url');
 const FIREBASE_PROJECT_ID = 'guodaxia-daily';
 const FIREBASE_API_KEY = 'AIzaSyAMdiyfckokXEAQvtJXWnKt-hF0XVelVo0';
 
+// 共享组配置
+const GROUPS = {
+  'family': { password: '123456', name: '家庭组' },
+  'work': { password: 'work123', name: '工作组' }
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
-  'Content-Type': 'application/json'
+  'Content-Type': 'application/json; charset=utf-8'
 };
 
 async function firestoreRequest(path, method = 'GET', data = null) {
@@ -60,6 +66,16 @@ function generateId() {
   return `schedule-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function verifyPassword(groupId, password) {
+  const group = GROUPS[groupId];
+  if (!group) return false;
+  return group.password === password;
+}
+
+function getGroupUserId(groupId) {
+  return `group-${groupId}`;
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(200, corsHeaders);
@@ -79,101 +95,55 @@ const server = http.createServer(async (req, res) => {
   try { data = body ? JSON.parse(body) : null; } catch (e) { data = null; }
 
   try {
+    if (path === '/api/groups' && req.method === 'GET') {
+      const groupList = Object.entries(GROUPS).map(([id, info]) => ({ id, name: info.name }));
+      res.writeHead(200, corsHeaders);
+      res.end(JSON.stringify({ success: true, data: groupList }));
+      return;
+    }
+
     if (path === '/api/schedules' && req.method === 'GET') {
-      const userId = query.userId;
-      if (!userId) {
+      const groupId = query.groupId;
+      const password = query.password;
+      
+      if (!groupId || !password) {
         res.writeHead(400, corsHeaders);
-        res.end(JSON.stringify({ error: '缺少 userId 参数' }));
+        res.end(JSON.stringify({ error: '缺少 groupId 或 password 参数' }));
         return;
       }
+
+      if (!verifyPassword(groupId, password)) {
+        res.writeHead(401, corsHeaders);
+        res.end(JSON.stringify({ error: '密码错误' }));
+        return;
+      }
+
+      const userId = getGroupUserId(groupId);
       const result = await firestoreRequest(`/users/${userId}/schedules`);
       const schedules = (result.documents || []).map(fromFirestore).filter(Boolean);
+      
       res.writeHead(200, corsHeaders);
       res.end(JSON.stringify({ success: true, data: schedules }));
       return;
     }
 
     if (path === '/api/schedules/by-date' && req.method === 'GET') {
-      const userId = query.userId;
+      const groupId = query.groupId;
+      const password = query.password;
       const date = query.date;
-      if (!userId || !date) {
+      
+      if (!groupId || !password || !date) {
         res.writeHead(400, corsHeaders);
-        res.end(JSON.stringify({ error: '缺少 userId 或 date 参数' }));
+        res.end(JSON.stringify({ error: '缺少参数' }));
         return;
       }
+
+      if (!verifyPassword(groupId, password)) {
+        res.writeHead(401, corsHeaders);
+        res.end(JSON.stringify({ error: '密码错误' }));
+        return;
+      }
+
+      const userId = getGroupUserId(groupId);
       const result = await firestoreRequest(`/users/${userId}/schedules`);
-      const schedules = (result.documents || []).map(fromFirestore).filter(s => s && s.date === date);
-      res.writeHead(200, corsHeaders);
-      res.end(JSON.stringify({ success: true, data: schedules }));
-      return;
-    }
-
-    if (path === '/api/schedules' && req.method === 'POST') {
-      const { userId, schedule } = data || {};
-      if (!userId || !schedule) {
-        res.writeHead(400, corsHeaders);
-        res.end(JSON.stringify({ error: '缺少 userId 或 schedule 参数' }));
-        return;
-      }
-      const newSchedule = { ...schedule, id: schedule.id || generateId(), createdAt: Date.now(), updatedAt: Date.now() };
-      await firestoreRequest(`/users/${userId}/schedules/${newSchedule.id}`, 'PATCH', toFirestore(newSchedule));
-      res.writeHead(200, corsHeaders);
-      res.end(JSON.stringify({ success: true, data: newSchedule }));
-      return;
-    }
-
-    if (path.match(/^\/api\/schedules\/[^/]+$/) && req.method === 'PUT') {
-      const scheduleId = path.split('/').pop();
-      const { userId, schedule } = data || {};
-      if (!userId || !schedule) {
-        res.writeHead(400, corsHeaders);
-        res.end(JSON.stringify({ error: '缺少 userId 或 schedule 参数' }));
-        return;
-      }
-      const updatedSchedule = { ...schedule, updatedAt: Date.now() };
-      await firestoreRequest(`/users/${userId}/schedules/${scheduleId}`, 'PATCH', toFirestore(updatedSchedule));
-      res.writeHead(200, corsHeaders);
-      res.end(JSON.stringify({ success: true, data: updatedSchedule }));
-      return;
-    }
-
-    if (path.match(/^\/api\/schedules\/[^/]+$/) && req.method === 'DELETE') {
-      const scheduleId = path.split('/').pop();
-      const userId = query.userId;
-      if (!userId) {
-        res.writeHead(400, corsHeaders);
-        res.end(JSON.stringify({ error: '缺少 userId 参数' }));
-        return;
-      }
-      await firestoreRequest(`/users/${userId}/schedules/${scheduleId}`, 'DELETE');
-      res.writeHead(200, corsHeaders);
-      res.end(JSON.stringify({ success: true, message: '删除成功' }));
-      return;
-    }
-
-    if (path === '/api/health' && req.method === 'GET') {
-      res.writeHead(200, corsHeaders);
-      res.end(JSON.stringify({ success: true, message: 'API 运行正常' }));
-      return;
-    }
-
-    if (path === '/' && req.method === 'GET') {
-      res.writeHead(200, { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' });
-      res.end('<h1>📅 Schedule API</h1><p>API 运行正常</p><p><a href="/api/health">测试</a></p>');
-      return;
-    }
-
-    res.writeHead(404, corsHeaders);
-    res.end(JSON.stringify({ error: '接口不存在' }));
-
-  } catch (error) {
-    console.error('API 错误:', error);
-    res.writeHead(500, corsHeaders);
-    res.end(JSON.stringify({ error: '服务器内部错误', message: error.message }));
-  }
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Schedule API 运行在端口 ${PORT}`);
-});
+      const schedules
